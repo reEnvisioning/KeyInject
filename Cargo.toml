@@ -1,0 +1,13 @@
+[package]
+name = "keyinject"
+version = "0.1.0"
+edition = "2021"
+description = "Emit one key tap through Linux uinput"
+license = "MIT"
+
+[[bin]]
+name = "keyinject"
+path = "src/main.rs"
+
+[dependencies]
+evdev = { version = "0.13.2", default-features = false }
