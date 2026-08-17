@@ -43,3 +43,4 @@ keyinject reset
 ## Safety
 
 Global input injection is for trusted local users only. Linux and restricted read/write `/dev/uinput` access are required; never make it world-writable.
+If the server is interrupted, the next `keyinject server` removes a refused same-user mode-0600 socket at its runtime path.

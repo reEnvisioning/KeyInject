@@ -387,6 +387,21 @@ fn socket_meta(path: &Path, uid: u32) -> Result<Metadata, String> {
     Ok(meta)
 }
 
+fn remove_stale_socket(path: &Path, expected: &Metadata, uid: u32) -> Result<(), String> {
+    let meta = socket_meta(path, uid)?;
+    if meta.dev() != expected.dev()
+        || meta.ino() != expected.ino()
+        || meta.ctime() != expected.ctime()
+        || meta.ctime_nsec() != expected.ctime_nsec()
+    {
+        return Err(format!(
+            "{} changed while checking stale socket",
+            path.display()
+        ));
+    }
+    fs::remove_file(path).map_err(|e| format!("cannot remove stale {}: {e}", path.display()))
+}
+
 struct SocketGuard {
     path: PathBuf,
     dev: u64,
@@ -425,10 +440,16 @@ fn bind_socket(path: &Path) -> Result<(UnixListener, SocketGuard), String> {
     let uid = uid()?;
     match fs::symlink_metadata(path) {
         Ok(_) => {
-            return Err(format!(
-                "{} already exists; after verifying no keyinject server is running, remove the stale socket as the same user",
-                path.display()
-            ));
+            let meta = socket_meta(path, uid)?;
+            match UnixStream::connect(path) {
+                Ok(_) => return Err(format!("{} already has a keyinject server", path.display())),
+                Err(error) if error.kind() == io::ErrorKind::ConnectionRefused => {
+                    remove_stale_socket(path, &meta, uid)?;
+                }
+                Err(error) => {
+                    return Err(format!("cannot check existing {}: {error}", path.display()));
+                }
+            }
         }
         Err(error) if error.kind() == io::ErrorKind::NotFound => {}
         Err(error) => return Err(format!("cannot inspect {}: {error}", path.display())),
@@ -849,13 +870,16 @@ mod tests {
     }
 
     #[test]
-    fn startup_preserves_every_existing_socket_path() {
+    fn socket_startup_clears_only_verified_stale_socket() {
         let dir = temp_dir();
         let path = dir.join(SOCKET_NAME);
+        let owner = uid().unwrap();
+
         fs::write(&path, "keep").unwrap();
         assert!(bind_socket(&path).is_err());
         assert_eq!(fs::read_to_string(&path).unwrap(), "keep");
         fs::remove_file(&path).unwrap();
+
         std::os::unix::fs::symlink("missing", &path).unwrap();
         assert!(bind_socket(&path).is_err());
         assert!(fs::symlink_metadata(&path)
@@ -863,14 +887,31 @@ mod tests {
             .file_type()
             .is_symlink());
         fs::remove_file(&path).unwrap();
+
         let active = UnixListener::bind(&path).unwrap();
         fs::set_permissions(&path, Permissions::from_mode(0o600)).unwrap();
         let active_ino = fs::symlink_metadata(&path).unwrap().ino();
         assert!(bind_socket(&path).is_err());
         assert_eq!(fs::symlink_metadata(&path).unwrap().ino(), active_ino);
         drop(active);
-        assert!(bind_socket(&path).is_err());
-        assert_eq!(fs::symlink_metadata(&path).unwrap().ino(), active_ino);
+
+        let _stale = socket_meta(&path, owner).unwrap();
+        let (listener, guard) = bind_socket(&path).unwrap();
+        assert!(UnixStream::connect(&path).is_ok());
+        drop(listener);
+        drop(guard);
+
+        let old = UnixListener::bind(&path).unwrap();
+        fs::set_permissions(&path, Permissions::from_mode(0o600)).unwrap();
+        let old_meta = socket_meta(&path, owner).unwrap();
+        drop(old);
+        fs::remove_file(&path).unwrap();
+        thread::sleep(Duration::from_millis(1));
+        let replacement = UnixListener::bind(&path).unwrap();
+        fs::set_permissions(&path, Permissions::from_mode(0o600)).unwrap();
+        assert!(remove_stale_socket(&path, &old_meta, owner).is_err());
+        assert!(UnixStream::connect(&path).is_ok());
+        drop(replacement);
         fs::remove_file(path).unwrap();
         fs::remove_dir(dir).unwrap();
     }
