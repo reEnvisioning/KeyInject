@@ -14,10 +14,26 @@ inputs.keyinject.url = "github:reEnvisioning/KeyInject";
 packages.${pkgs.system}.default = inputs.keyinject.packages.${pkgs.system}.default;
 ```
 
+## NixOS
+
+```nix
+hardware.uinput.enable = true;
+users.users.visionary.extraGroups = [ "uinput" ]; # trusted account only
+```
+
+Start a fresh login afterward; do not run `keyinject` with sudo.
+
 ## Use
+
+In terminal one:
 
 ```sh
 keyinject server
+```
+
+In terminal two:
+
+```sh
 keyinject input a
 keyinject down leftctrl
 keyinject up leftctrl

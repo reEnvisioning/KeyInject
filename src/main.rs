@@ -555,7 +555,9 @@ fn run_client(line: String) -> Result<(), String> {
 
 fn setup_error(context: &str, error: io::Error) -> String {
     if error.kind() == io::ErrorKind::PermissionDenied {
-        format!("cannot access /dev/uinput; required access is restricted read/write access for the trusted local user: {error}")
+        format!(
+            "cannot access /dev/uinput; grant the trusted account read/write uinput access. On NixOS, enable hardware.uinput and add it to the uinput group, then start a fresh login. Do not run keyinject with sudo: {error}"
+        )
     } else {
         format!("{context}: {error}")
     }
@@ -615,6 +617,16 @@ mod tests {
         fs::create_dir(&dir).unwrap();
         fs::set_permissions(&dir, Permissions::from_mode(0o700)).unwrap();
         dir
+    }
+
+    #[test]
+    fn permission_denied_guidance_uses_restricted_unprivileged_access() {
+        let message = setup_error("ignored", io::Error::from(io::ErrorKind::PermissionDenied));
+        assert!(message.contains("grant the trusted account read/write uinput access"));
+        assert!(message.contains("hardware.uinput"));
+        assert!(message.contains("uinput group"));
+        assert!(message.contains("fresh login"));
+        assert!(message.contains("Do not run keyinject with sudo"));
     }
 
     #[test]
