@@ -9,5 +9,5 @@ license = "MIT"
 name = "keyinject"
 path = "src/main.rs"
 
-[dependencies]
+[target.'cfg(target_os = "linux")'.dependencies]
 evdev = { version = "0.13.2", default-features = false }
